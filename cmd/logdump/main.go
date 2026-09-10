@@ -24,6 +24,7 @@ import (
 	"github.com/bazelbuild/reclient/internal/pkg/rbeflag"
 	"github.com/bazelbuild/reclient/internal/pkg/version"
 
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	lpb "github.com/bazelbuild/reclient/api/log"
@@ -33,10 +34,11 @@ import (
 )
 
 var (
-	proxyLogDir []string
-	logFormat   = flag.String("log_format", "text", "Format of proxy log. Currently only text is supported.")
-	logPath     = flag.String("log_path", "", "DEPRECATED. Use proxy_log_dir instead. If provided, the path to a log file of all executed records. The format is e.g. text://full/file/path.")
-	outputDir   = flag.String("output_dir", "/tmp/", "The location to which stats should be written.")
+	proxyLogDir  []string
+	logFormat    = flag.String("log_format", "text", "Format of proxy log. Currently only text is supported.")
+	logPath      = flag.String("log_path", "", "DEPRECATED. Use proxy_log_dir instead. If provided, the path to a log file of all executed records. The format is e.g. text://full/file/path.")
+	outputDir    = flag.String("output_dir", "/tmp/", "The location to which stats should be written.")
+	outputFormat = flag.String("output_format", "pb", "The output format. Can be 'pb' suitable for reproducing issues or 'json' for plain text reading.")
 )
 
 func main() {
@@ -54,6 +56,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Bad log format: %v", err)
 	}
+	if *outputFormat != "pb" && *outputFormat != "json" {
+		log.Fatalf("Bad output format (must be 'pb' or 'json'): %s", *outputFormat)
+	}
 
 	var recs []*lpb.LogRecord
 	if len(proxyLogDir) != 0 {
@@ -68,12 +73,26 @@ func main() {
 		}
 	}
 	dump := &lpb.LogDump{Records: recs}
-	out, err := proto.Marshal(dump)
+
+	var out []byte
+	var outFile string
+	if *outputFormat == "json" {
+		opts := protojson.MarshalOptions{
+			UseProtoNames:   true,
+			EmitUnpopulated: true,
+		}
+		out, err = opts.Marshal(dump)
+		outFile = "reproxy_log.json"
+	} else {
+		out, err = proto.Marshal(dump)
+		outFile = "reproxy_log.pb"
+	}
 	if err != nil {
 		log.Fatalf("Failed to encode log records: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(*outputDir, "reproxy_log.pb"), out, 0644); err != nil {
-		log.Fatalf("Failed to write log pb file: %v", err)
+
+	if err := os.WriteFile(filepath.Join(*outputDir, outFile), out, 0644); err != nil {
+		log.Fatalf("Failed to write log output file: %v", err)
 	}
 	log.Infof("Log dumped successfully.")
 }
